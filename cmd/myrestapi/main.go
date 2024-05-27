@@ -2,6 +2,8 @@ package main
 
 import (
 	config "dev/myrestapi/internal"
+	"dev/myrestapi/internal/http-server/handlers/save"
+	mwLogger "dev/myrestapi/internal/http-server/middleware/logger"
 	"dev/myrestapi/internal/logger/handlers/sl"
 	"dev/myrestapi/internal/logger/handlers/slogpretty"
 	"dev/myrestapi/internal/storage/sqlite"
@@ -9,6 +11,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
 const (
@@ -17,26 +22,6 @@ const (
 	envProd  = "prod"
 )
 
-// Обработчик главной страницы
-func home(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" { //если домашняя страница обозначена иначе чем "/", то прервать обработку
-		http.NotFound(w, r)
-		return
-	}
-	w.Write([]byte("Привет от моего сервера"))
-}
-
-// Обработчик для отображения заметки
-func showSnippet(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Отображение заметки ..."))
-}
-
-// Обработчик для создания новой заметки
-func createSnippet(w http.ResponseWriter, r *http.Request) {
-
-	w.Write([]byte("Форма для создания новой заметки ..."))
-}
-
 func main() {
 	//TODO init config : cleanenv
 	cfg := config.MustLoad()
@@ -44,8 +29,6 @@ func main() {
 	//TODO init logger: slog
 	log := setuplogger(cfg.Env)
 	log = log.With(slog.String("env", cfg.Env))
-	// log.Info("starting myrestapi", slog.String("env", cfg.Env))
-	// log.Debug("debug massage are enabled")
 
 	//TODO init storage: sqlite
 	storage, err := sqlite.New(cfg.StoragePath)
@@ -53,49 +36,32 @@ func main() {
 		log.Error("failed to init storage", sl.Err(err))
 		os.Exit(1)
 	}
-	/*
-		// ручной тест метода сохранения записи
-		testSave := save.Request{
-			Genre: "портрет",
-			Name:  "автопортрет",
-			Size:  "30*40",
-		}
-		id, err := storage.SavePicture(&testSave)
-		if err != nil {
-			log.Error("failed to save picture", sl.Err(err))
-			os.Exit(1)
-		}
-		log.Info("saved picture ", slog.Int64("id", id))
-	*/
 
-	/*
-	// ручной тест метода выборки из базы данных
+	//_ = storage //временное решение
 
-	pictureResp, err := storage.GetPicture("пейзаж")
-	if err != nil {
-		log.Error("failed to get picture", sl.Err(err))
-		os.Exit(1)
-	}
-	for _, v := range pictureResp {
-		fmt.Printf("Genre: %s, Name: %s, Size: %s.\n",v.Genre,v.Name,v.Size )
-	}
-	*/
+	//init router: chi, "chi render"
+	router := chi.NewRouter()
+	router.Use(middleware.RequestID) //добавляет request_id в каждый запрос
+	router.Use(middleware.Logger)
+	router.Use(mwLogger.New(log))    // переопределение штатного логера
+	router.Use(middleware.URLFormat) //Парсер URLов поступающих запросов
 
-	_ = storage //временное решение
-
-	//TODO init router: chi, "chi render"
-	//Регистрируем два обработчика и соответствующие URL-шаблоны
-	//маршрутизатора servemux
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", home)
-	mux.HandleFunc("/snippet", showSnippet)
-	mux.HandleFunc("/snippet/create", createSnippet)
+	router.Post("/name", save.New(log, storage)) //Парсер URLов поступающих запросов
 
 	//TODO run server:
+	srv := &http.Server{
+		Addr:         cfg.Address,
+		Handler:      router,
+		ReadTimeout:  cfg.HTTPServer.Timeout,
+		WriteTimeout: cfg.HTTPServer.Timeout,
+		IdleTimeout:  cfg.HTTPServer.IdleTimeout,
+	}
+
 	log.Info("Initializing server", slog.String("address", cfg.Address))
 	log.Debug("logger debug mode enabled")
 	stdLog.Printf("запущен сервер %s", cfg.Address) //просто проверка работы стандартного логера
-	if err := http.ListenAndServe(cfg.Address, mux); err != nil {
+
+	if err := srv.ListenAndServe(); err != nil {
 		log.Info("невозможно запустить сервер:", cfg.Address, err)
 	}
 

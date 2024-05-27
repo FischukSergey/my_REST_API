@@ -101,10 +101,10 @@ func (s *Storage) GetPicture(alias string) ([]save.Request, error) {
 	if err != nil {
 		return []save.Request{}, fmt.Errorf("%s: execute statement: %w", op, err)
 	}
-	
+
 	// заносим строки в результирующий срез
 	for resp.Next() {
-	
+
 		picture := save.Request{}
 
 		err := resp.Scan(&picture.Genre, &picture.Name, &picture.Size)
@@ -116,4 +116,27 @@ func (s *Storage) GetPicture(alias string) ([]save.Request, error) {
 	}
 
 	return resGenre, nil
+}
+
+// DeletePicture метод удаления записи по имени картины.
+// Возвращает количество удаленных строк и ошибку.
+func (s *Storage) DeletePicture(alias string) (int64, error) {
+	const op = "storage.sqlite.DeletePicture"
+
+	//Подготавливаем запрос
+	stmt, err := s.db.Prepare("DELETE FROM picture WHERE name =?")
+	if err != nil {
+		return 0, fmt.Errorf("%s: prepare statement: %w", op, err)
+	}
+	//Выполняем запрос
+	result, err := stmt.Exec(alias)
+	if err != nil {
+		return 0, fmt.Errorf("%s: executive statement: %w", op, err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("%s: failed to delete with name picture: %w", op, err)
+	}
+	//Возвращаем количество удаленных записей
+	return count, nil
 }
